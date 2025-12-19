@@ -9,7 +9,7 @@ import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { Facebook, Linkedin, Instagram, Plus, Trash2, Users, User, CheckCircle, XCircle } from 'lucide-react';
 
-// COMPONENTS
+// --- FLAT IMPORTS (As requested) ---
 import { NetworkBackground } from './NetworkBackground';
 import { SplashScreen } from './SplashScreen';
 import { FormInput, FormSelect } from './FormComponents';
@@ -19,10 +19,9 @@ import ChaosOrbCursor from './ChaosOrbCursor';
 const branches = ['CSE', 'CSE (AIML)', 'CSE (DS)', 'AIML', 'CS', 'CS (H)', 'IT', 'CSIT', 'ECE', 'EEE', 'Civil', 'Mechanical'];
 const genders = ['Male', 'Female', 'Other'];
 
-// SCHEMA
+// SCHEMA (Removed Unnecessary Fields)
 const memberSchema = z.object({
   fullName: z.string().min(3, "Too short"),
-  // Using college email logic for simplicity as requested
   collegeEmail: z.string().email("Invalid email").endsWith("@akgec.ac.in", "Must be @akgec.ac.in"),
   gender: z.enum(genders, { required_error: "Required" }),
   branch: z.enum(branches, { required_error: "Required" }),
@@ -44,7 +43,6 @@ const teamSchema = z.object({
 
 export default function TeamRegister() {
   const [isLoading, setIsLoading] = useState(false);
-  const [captchaToken, setCaptchaToken] = useState(null);
   const [showSplash, setShowSplash] = useState(true);
   const [isTeamNameAvailable, setIsTeamNameAvailable] = useState(null);
   const recaptchaRef = useRef(null);
@@ -74,26 +72,42 @@ export default function TeamRegister() {
   };
 
   const onSubmit = async (data) => {
-    if (!captchaToken) { toast.error("Complete CAPTCHA"); return; }
     if (isTeamNameAvailable === false) { toast.error("Team name taken"); return; }
-
-    const apiData = {
-        ...data,
-        members: data.members.map(m => ({
-            ...m,
-            personalEmail: m.collegeEmail,
-            hackerRankUrl: "https://hackerrank.com/placeholder"
-        }))
-    };
-
+    
     setIsLoading(true);
     try {
-      await axios.post('https://team-registeration-4.onrender.com/api/register', apiData, { headers: { 'Content-Type': 'application/json' } });
+      // 1. EXECUTE INVISIBLE RECAPTCHA
+      // This will trigger the check (and challenge if needed) without user clicking a box
+      const token = await recaptchaRef.current.executeAsync();
+      
+      if (!token) {
+        toast.error("Captcha Verification Failed");
+        setIsLoading(false);
+        return;
+      }
+
+      // 2. PREPARE DATA (Fill defaults for removed fields to satisfy API)
+      const apiData = {
+          ...data,
+          members: data.members.map(m => ({
+              ...m,
+              personalEmail: m.collegeEmail, // Fallback to college email
+              hackerRankUrl: "https://hackerrank.com/placeholder" // Dummy URL
+          }))
+      };
+
+      // 3. SEND TO API
+      await axios.post('https://team-registeration-4.onrender.com/api/register', 
+        { ...apiData, captchaToken: token }, 
+        { headers: { 'Content-Type': 'application/json' } }
+      );
+
       toast.success("Registered Successfully!");
+      recaptchaRef.current.reset(); 
       setTimeout(() => window.location.reload(), 2000);
+      
     } catch (error) {
-      toast.error(error.response?.data?.errors?.[0]?.message || 'Failed');
-      setCaptchaToken(null);
+      toast.error(error.response?.data?.errors?.[0]?.message || 'Registration Failed');
       recaptchaRef.current?.reset();
     } finally {
       setIsLoading(false);
@@ -160,6 +174,7 @@ export default function TeamRegister() {
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             <FormInput name={`members.${index}.fullName`} placeholder="Full Name" register={register} error={errors?.members?.[index]?.fullName} type="text" />
                                             <FormInput name={`members.${index}.studentNumber`} placeholder="Student No." register={register} error={errors?.members?.[index]?.studentNumber} type="text" />
+                                            {/* ONLY College Email */}
                                             <div className="md:col-span-2">
                                                 <FormInput name={`members.${index}.collegeEmail`} placeholder="College Email (@akgec.ac.in)" register={register} error={errors?.members?.[index]?.collegeEmail} type="email" />
                                             </div>
@@ -188,8 +203,14 @@ export default function TeamRegister() {
                         )}
 
                         <div className="flex flex-col items-center gap-6 pt-4">
-                            {/* FIXED: Using the API-specific V2 key you provided */}
-                            <ReCAPTCHA ref={recaptchaRef} sitekey="6Ldj5C4sAAAAAHdQleK1Gis3yNPuj7lEnmN8tccZ" onChange={(token) => setCaptchaToken(token)} theme="dark" />
+                            {/* INVISIBLE RECAPTCHA */}
+                            <ReCAPTCHA 
+                                ref={recaptchaRef} 
+                                size="invisible"
+                                sitekey="6Ldj5C4sAAAAAHdQleK1Gis3yNPuj7lEnmN8tccZ" 
+                                theme="dark"
+                            />
+                            
                             <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} type="submit" disabled={isLoading} className="px-12 py-4 bg-gradient-to-r from-[#0066cc] to-[#00aaff] rounded-full font-bold text-lg tracking-wider shadow-lg text-white disabled:opacity-50">{isLoading ? "Registering..." : "COMPLETE REGISTRATION"}</motion.button>
                         </div>
                     </form>
@@ -211,7 +232,7 @@ export default function TeamRegister() {
                          <img src="/cccLogo.png" alt="CCC Logo" className="w-10 h-10 object-contain drop-shadow-[0_0_10px_rgba(0,170,255,0.5)]" />
                          <h1 className="text-2xl md:text-5xl font-bold text-center text-white tracking-widest drop-shadow-2xl">CLOUD COMPUTING CELL</h1>
                     </div>
-                    {/* SPARKLES REMOVED */}
+                    {/* SPARKLES COMPONENT REMOVED TO PREVENT CRASH */}
                     <div className="absolute top-[60%] left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-4xl h-full z-0 pointer-events-none">
                         <div className="absolute inset-0 w-full h-full bg-transparent [mask-image:radial-gradient(350px_200px_at_center,transparent_20%,white)]"></div>
                     </div>
