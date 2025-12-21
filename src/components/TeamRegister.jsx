@@ -16,24 +16,24 @@ import { FormInput, FormSelect } from './FormComponents';
 import ChaosOrbCursor from './ChaosOrbCursor';
 
 // CONFIG
-const branches = ['CSE', 'CSE (AIML)', 'CSE (DS)', 'AIML', 'CS', 'CS (H)', 'IT', 'CSIT', 'ECE', 'EEE', 'Civil', 'Mechanical'];
-const genders = ['Male', 'Female', 'Other'];
+const branches = ['CSE', 'CSE(AIML)', 'CSE(DS)', 'AIML', 'CS', 'CS(Hindi)', 'CSIT', 'IT', 'ECE', 'EEE', 'Mechanical', 'CIVIL'];
+const genders = ['Male', 'Female'];
+const addressTypes = ['dayscholar', 'hosteller'];
+
+// BACKEND URL
+const BACKEND_URL = "https://team-registeration-2.onrender.com";
 
 // SCHEMA
 const memberSchema = z.object({
   fullName: z.string().min(3, "Too short"),
-  collegeEmail: z.string().email("Invalid email").endsWith("@akgec.ac.in", "Must be @akgec.ac.in"),
+  collegeEmail: z.string()
+    .toLowerCase()
+    .regex(/^[a-z]+[0-9]+@akgec\.ac\.in$/, "Must be letters + numbers @akgec.ac.in (e.g., krish2412@akgec.ac.in)"),
   gender: z.enum(genders, { required_error: "Required" }),
   branch: z.enum(branches, { required_error: "Required" }),
-  studentNumber: z.string().regex(/^\d+$/, "Numbers only").min(7, "Invalid"),
-  unstopId: z.string().min(1, "Required"),
-  residenceAddress: z.object({
-    street: z.string().min(1, "Required"),
-    city: z.string().min(1, "Required"),
-    state: z.string().min(1, "Required"),
-    pincode: z.string().min(6, "Invalid"),
-    country: z.string().default("India")
-  })
+  studentNumber: z.string().regex(/^[0-9]{3,15}$/, "Must be 3-15 digits"),
+  unstopId: z.string().regex(/^[A-Za-z0-9_-]{3,50}$|^NaN$/, "3-50 chars or NaN"),
+  addressType: z.enum(addressTypes, { required_error: "Required" })
 });
 
 const teamSchema = z.object({
@@ -53,8 +53,8 @@ export default function TeamRegister() {
     defaultValues: {
       teamName: "",
       members: [
-        { residenceAddress: { country: "India" } },
-        { residenceAddress: { country: "India" } }
+        { addressType: "dayscholar" },
+        { addressType: "dayscholar" }
       ]
     }
   });
@@ -63,19 +63,14 @@ export default function TeamRegister() {
 
   const checkTeamName = async (name) => {
     setIsTeamNameAvailable(null);
-
     if (!name || name.length < 3) return;
     
     try {
-      // FIXED: Using relative path to trigger Vite Proxy
-      const res = await axios.get(`/api/check/team?teamName=${name}`);
-      
+      const res = await axios.get(`${BACKEND_URL}/api/check/team?teamName=${name}`);
       if (res.data && res.data.success) {
         setIsTeamNameAvailable(res.data.available);
       }
     } catch (error) {
-      console.warn("Team Check Failed (likely network error or CORS):", error);
-      // Leave as null so we don't block the user
       setIsTeamNameAvailable(null);
     }
   };
@@ -91,26 +86,24 @@ export default function TeamRegister() {
       // 1. EXECUTE INVISIBLE RECAPTCHA
       let token = "";
       try {
-        // This will fail on localhost with your production key, so we catch it
         token = await recaptchaRef.current.executeAsync();
       } catch (captchaError) {
-        console.warn("Captcha execution warning (Ignore on Localhost):", captchaError);
-        // We continue without a token on localhost so you can at least test the API connection
+        console.warn("Captcha ignored (Localhost restriction)");
       }
 
       // 2. PREPARE DATA
+      // Note: We no longer map 'residenceAddress' as it was removed from schema
       const apiData = {
           ...data,
           members: data.members.map(m => ({
               ...m,
-              personalEmail: m.collegeEmail,
-              hackerRankUrl: "https://hackerrank.com/placeholder"
+              // Backend might still want personalEmail? If not, this line is harmless extra data
+              personalEmail: m.collegeEmail, 
           }))
       };
 
       // 3. SEND TO API
-      // FIXED: Using relative path to trigger Vite Proxy
-      await axios.post('/api/register', 
+      await axios.post(`${BACKEND_URL}/api/register`, 
         { ...apiData, captchaToken: token }, 
         { headers: { 'Content-Type': 'application/json' } }
       );
@@ -165,6 +158,7 @@ export default function TeamRegister() {
                     </div>
 
                     <form onSubmit={handleSubmit(onSubmit)} className="space-y-8 pb-20">
+                        {/* TEAM NAME SECTION */}
                         <div className="relative p-[1px] rounded-2xl bg-gradient-to-b from-blue-500/50 to-transparent">
                             <div className="bg-black/80 backdrop-blur-xl rounded-2xl p-6 border border-white/5">
                                 <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Users className="w-5 h-5 text-[#00aaff]" /> Team Details</h2>
@@ -185,6 +179,7 @@ export default function TeamRegister() {
                             </div>
                         </div>
 
+                        {/* MEMBERS SECTION */}
                         <div className="space-y-6">
                             {fields.map((field, index) => (
                                 <motion.div key={field.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="relative p-[1px] rounded-2xl bg-gradient-to-b from-white/10 to-transparent">
@@ -193,25 +188,46 @@ export default function TeamRegister() {
                                             <h3 className="text-lg font-bold text-white flex items-center gap-2"><User className="w-4 h-4 text-blue-400" /> {index === 0 ? "Team Leader" : `Member ${index + 1}`}</h3>
                                             {index > 1 && (<button type="button" onClick={() => remove(index)} className="text-red-400 hover:text-red-300"><Trash2 size={18} /></button>)}
                                         </div>
+                                        
+                                        {/* MEMBER FORM GRID */}
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            {/* FULL NAME & STUDENT NO */}
                                             <FormInput name={`members.${index}.fullName`} placeholder="Full Name" register={register} error={errors?.members?.[index]?.fullName} type="text" />
-                                            <FormInput name={`members.${index}.studentNumber`} placeholder="Student No." register={register} error={errors?.members?.[index]?.studentNumber} type="text" />
+                                            <FormInput name={`members.${index}.studentNumber`} placeholder="Student No. (3-15 digits)" register={register} error={errors?.members?.[index]?.studentNumber} type="text" />
+                                            
+                                            {/* COLLEGE EMAIL (Strict Regex) */}
                                             <div className="md:col-span-2">
-                                                <FormInput name={`members.${index}.collegeEmail`} placeholder="College Email (@akgec.ac.in)" register={register} error={errors?.members?.[index]?.collegeEmail} type="email" />
+                                                <FormInput 
+                                                    name={`members.${index}.collegeEmail`} 
+                                                    placeholder="Email (e.g. name24123@akgec.ac.in)" 
+                                                    register={register} 
+                                                    error={errors?.members?.[index]?.collegeEmail} 
+                                                    type="email" 
+                                                />
                                             </div>
-                                            <div className="z-[50] relative"><FormSelect name={`members.${index}.gender`} placeholder="Gender" setValue={setValue} watch={watch} options={genders} error={errors?.members?.[index]?.gender} /></div>
-                                            <div className="z-[50] relative"><FormSelect name={`members.${index}.branch`} placeholder="Branch" setValue={setValue} watch={watch} options={branches} error={errors?.members?.[index]?.branch} /></div>
+
+                                            {/* DROPDOWNS: GENDER, BRANCH, ADDRESS TYPE */}
+                                            <div className="z-[50] relative">
+                                                <FormSelect name={`members.${index}.gender`} placeholder="Gender" setValue={setValue} watch={watch} options={genders} error={errors?.members?.[index]?.gender} />
+                                            </div>
+                                            <div className="z-[50] relative">
+                                                <FormSelect name={`members.${index}.branch`} placeholder="Branch" setValue={setValue} watch={watch} options={branches} error={errors?.members?.[index]?.branch} />
+                                            </div>
+                                            
+                                            <div className="z-[40] relative md:col-span-2">
+                                                <FormSelect 
+                                                    name={`members.${index}.addressType`} 
+                                                    placeholder="Residence Type (Hosteller/Dayscholar)" 
+                                                    setValue={setValue} 
+                                                    watch={watch} 
+                                                    options={addressTypes} 
+                                                    error={errors?.members?.[index]?.addressType} 
+                                                />
+                                            </div>
+
+                                            {/* UNSTOP ID */}
                                             <div className="md:col-span-2">
-                                                <FormInput name={`members.${index}.unstopId`} placeholder="Unstop ID" register={register} error={errors?.members?.[index]?.unstopId} type="text" />
-                                            </div>
-                                        </div>
-                                        <div className="mt-4 pt-4 border-t border-white/10">
-                                            <p className="text-xs text-gray-400 mb-2 uppercase tracking-widest">Address</p>
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                                <div className="md:col-span-2"><FormInput name={`members.${index}.residenceAddress.street`} placeholder="Street" register={register} error={errors?.members?.[index]?.residenceAddress?.street} type="text" /></div>
-                                                <FormInput name={`members.${index}.residenceAddress.city`} placeholder="City" register={register} error={errors?.members?.[index]?.residenceAddress?.city} type="text" />
-                                                <FormInput name={`members.${index}.residenceAddress.state`} placeholder="State" register={register} error={errors?.members?.[index]?.residenceAddress?.state} type="text" />
-                                                <FormInput name={`members.${index}.residenceAddress.pincode`} placeholder="Pincode" register={register} error={errors?.members?.[index]?.residenceAddress?.pincode} type="text" />
+                                                <FormInput name={`members.${index}.unstopId`} placeholder="Unstop ID (or NaN)" register={register} error={errors?.members?.[index]?.unstopId} type="text" />
                                             </div>
                                         </div>
                                     </div>
@@ -220,11 +236,11 @@ export default function TeamRegister() {
                         </div>
 
                         {fields.length < 4 && (
-                            <button type="button" onClick={() => append({ residenceAddress: { country: "India" } })} className="w-full py-4 rounded-xl border-2 border-dashed border-white/10 text-gray-400 hover:text-white hover:border-[#00aaff] transition-all flex items-center justify-center gap-2"><Plus size={20} /> Add Member</button>
+                            <button type="button" onClick={() => append({ addressType: "dayscholar" })} className="w-full py-4 rounded-xl border-2 border-dashed border-white/10 text-gray-400 hover:text-white hover:border-[#00aaff] transition-all flex items-center justify-center gap-2"><Plus size={20} /> Add Member</button>
                         )}
 
                         <div className="flex flex-col items-center gap-6 pt-4">
-                            {/* YOUR KEY - WILL SHOW 401 ON LOCALHOST BUT WORK ON PRODUCTION */}
+                            {/* ReCAPTCHA */}
                             <ReCAPTCHA 
                                 ref={recaptchaRef} 
                                 size="invisible"
@@ -239,6 +255,7 @@ export default function TeamRegister() {
             </div>
           </div>
 
+          {/* FOOTER */}
           <div className="w-full relative z-10 border-t border-blue-900/30 bg-black/60 backdrop-blur-md mt-auto">
             <div className="max-w-7xl mx-auto px-6 py-12 flex flex-col items-center justify-center text-center">
               <div className="flex justify-center gap-6 mb-8 relative z-50">
@@ -253,7 +270,6 @@ export default function TeamRegister() {
                          <img src="/cccLogo.png" alt="CCC Logo" className="w-10 h-10 object-contain drop-shadow-[0_0_10px_rgba(0,170,255,0.5)]" />
                          <h1 className="text-2xl md:text-5xl font-bold text-center text-white tracking-widest drop-shadow-2xl">CLOUD COMPUTING CELL</h1>
                     </div>
-                    {/* SPARKLES COMPONENT REMOVED TO PREVENT CRASH */}
                     <div className="absolute top-[60%] left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-4xl h-full z-0 pointer-events-none">
                         <div className="absolute inset-0 w-full h-full bg-transparent [mask-image:radial-gradient(350px_200px_at_center,transparent_20%,white)]"></div>
                     </div>
