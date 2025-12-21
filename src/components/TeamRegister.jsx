@@ -44,7 +44,7 @@ const teamSchema = z.object({
 export default function TeamRegister() {
   const [isLoading, setIsLoading] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
-  const [isTeamNameAvailable, setIsTeamNameAvailable] = useState(null); // null=Unknown, true=Avail, false=Taken
+  const [isTeamNameAvailable, setIsTeamNameAvailable] = useState(null); 
   const recaptchaRef = useRef(null);
 
   const { register, control, handleSubmit, watch, setValue, formState: { errors } } = useForm({
@@ -61,30 +61,26 @@ export default function TeamRegister() {
 
   const { fields, append, remove } = useFieldArray({ control, name: "members" });
 
-  // --- FIXED TEAM NAME CHECK ---
   const checkTeamName = async (name) => {
-    // 1. Reset status immediately (Clears any previous red 'Taken' error)
     setIsTeamNameAvailable(null);
 
     if (!name || name.length < 3) return;
     
     try {
-      const res = await axios.get(`https://team-registeration-4.onrender.com/api/check/team?teamName=${name}`);
+      // FIXED: Using relative path to trigger Vite Proxy
+      const res = await axios.get(`/api/check/team?teamName=${name}`);
       
-      // 2. Only update if the API explicitly responds with success
       if (res.data && res.data.success) {
         setIsTeamNameAvailable(res.data.available);
       }
     } catch (error) {
-      console.warn("Team Check Failed (likely network error):", error);
-      // 3. CRITICAL FIX: If API fails, leave as NULL. Do NOT set to false.
-      // This ensures user can still submit even if the check endpoint is down.
+      console.warn("Team Check Failed (likely network error or CORS):", error);
+      // Leave as null so we don't block the user
       setIsTeamNameAvailable(null);
     }
   };
 
   const onSubmit = async (data) => {
-    // Only block if we are 100% sure it is taken. If null (unknown), we let it pass.
     if (isTeamNameAvailable === false) { 
         toast.error("Team name is already taken"); 
         return; 
@@ -93,13 +89,13 @@ export default function TeamRegister() {
     setIsLoading(true);
     try {
       // 1. EXECUTE INVISIBLE RECAPTCHA
-      // If on localhost, this might throw "Invalid Domain", but we catch it.
       let token = "";
       try {
+        // This will fail on localhost with your production key, so we catch it
         token = await recaptchaRef.current.executeAsync();
       } catch (captchaError) {
-        console.warn("Captcha execution warning:", captchaError);
-        // If it fails (e.g. localhost), we proceed without token to let backend handle validation
+        console.warn("Captcha execution warning (Ignore on Localhost):", captchaError);
+        // We continue without a token on localhost so you can at least test the API connection
       }
 
       // 2. PREPARE DATA
@@ -113,7 +109,8 @@ export default function TeamRegister() {
       };
 
       // 3. SEND TO API
-      await axios.post('https://team-registeration-4.onrender.com/api/register', 
+      // FIXED: Using relative path to trigger Vite Proxy
+      await axios.post('/api/register', 
         { ...apiData, captchaToken: token }, 
         { headers: { 'Content-Type': 'application/json' } }
       );
@@ -227,7 +224,7 @@ export default function TeamRegister() {
                         )}
 
                         <div className="flex flex-col items-center gap-6 pt-4">
-                            {/* INVISIBLE RECAPTCHA - YOUR KEY */}
+                            {/* YOUR KEY - WILL SHOW 401 ON LOCALHOST BUT WORK ON PRODUCTION */}
                             <ReCAPTCHA 
                                 ref={recaptchaRef} 
                                 size="invisible"
