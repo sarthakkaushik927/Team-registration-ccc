@@ -9,7 +9,7 @@ import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { Facebook, Linkedin, Instagram, Plus, Trash2, Users, User, CheckCircle, XCircle } from 'lucide-react';
 
-// --- FLAT IMPORTS (As requested) ---
+// COMPONENTS
 import { NetworkBackground } from './NetworkBackground';
 import { SplashScreen } from './SplashScreen';
 import { FormInput, FormSelect } from './FormComponents';
@@ -19,7 +19,7 @@ import ChaosOrbCursor from './ChaosOrbCursor';
 const branches = ['CSE', 'CSE (AIML)', 'CSE (DS)', 'AIML', 'CS', 'CS (H)', 'IT', 'CSIT', 'ECE', 'EEE', 'Civil', 'Mechanical'];
 const genders = ['Male', 'Female', 'Other'];
 
-// SCHEMA (Removed Unnecessary Fields)
+// SCHEMA
 const memberSchema = z.object({
   fullName: z.string().min(3, "Too short"),
   collegeEmail: z.string().email("Invalid email").endsWith("@akgec.ac.in", "Must be @akgec.ac.in"),
@@ -44,7 +44,7 @@ const teamSchema = z.object({
 export default function TeamRegister() {
   const [isLoading, setIsLoading] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
-  const [isTeamNameAvailable, setIsTeamNameAvailable] = useState(null);
+  const [isTeamNameAvailable, setIsTeamNameAvailable] = useState(null); // null=Unknown, true=Avail, false=Taken
   const recaptchaRef = useRef(null);
 
   const { register, control, handleSubmit, watch, setValue, formState: { errors } } = useForm({
@@ -61,38 +61,54 @@ export default function TeamRegister() {
 
   const { fields, append, remove } = useFieldArray({ control, name: "members" });
 
+  // --- FIXED TEAM NAME CHECK ---
   const checkTeamName = async (name) => {
-    if (name.length < 3) return;
+    // 1. Reset status immediately (Clears any previous red 'Taken' error)
+    setIsTeamNameAvailable(null);
+
+    if (!name || name.length < 3) return;
+    
     try {
       const res = await axios.get(`https://team-registeration-4.onrender.com/api/check/team?teamName=${name}`);
-      setIsTeamNameAvailable(res.data.available);
-    } catch {
-      setIsTeamNameAvailable(false);
+      
+      // 2. Only update if the API explicitly responds with success
+      if (res.data && res.data.success) {
+        setIsTeamNameAvailable(res.data.available);
+      }
+    } catch (error) {
+      console.warn("Team Check Failed (likely network error):", error);
+      // 3. CRITICAL FIX: If API fails, leave as NULL. Do NOT set to false.
+      // This ensures user can still submit even if the check endpoint is down.
+      setIsTeamNameAvailable(null);
     }
   };
 
   const onSubmit = async (data) => {
-    if (isTeamNameAvailable === false) { toast.error("Team name taken"); return; }
+    // Only block if we are 100% sure it is taken. If null (unknown), we let it pass.
+    if (isTeamNameAvailable === false) { 
+        toast.error("Team name is already taken"); 
+        return; 
+    }
     
     setIsLoading(true);
     try {
       // 1. EXECUTE INVISIBLE RECAPTCHA
-      // This will trigger the check (and challenge if needed) without user clicking a box
-      const token = await recaptchaRef.current.executeAsync();
-      
-      if (!token) {
-        toast.error("Captcha Verification Failed");
-        setIsLoading(false);
-        return;
+      // If on localhost, this might throw "Invalid Domain", but we catch it.
+      let token = "";
+      try {
+        token = await recaptchaRef.current.executeAsync();
+      } catch (captchaError) {
+        console.warn("Captcha execution warning:", captchaError);
+        // If it fails (e.g. localhost), we proceed without token to let backend handle validation
       }
 
-      // 2. PREPARE DATA (Fill defaults for removed fields to satisfy API)
+      // 2. PREPARE DATA
       const apiData = {
           ...data,
           members: data.members.map(m => ({
               ...m,
-              personalEmail: m.collegeEmail, // Fallback to college email
-              hackerRankUrl: "https://hackerrank.com/placeholder" // Dummy URL
+              personalEmail: m.collegeEmail,
+              hackerRankUrl: "https://hackerrank.com/placeholder"
           }))
       };
 
@@ -103,12 +119,14 @@ export default function TeamRegister() {
       );
 
       toast.success("Registered Successfully!");
-      recaptchaRef.current.reset(); 
+      if(recaptchaRef.current) recaptchaRef.current.reset(); 
       setTimeout(() => window.location.reload(), 2000);
       
     } catch (error) {
-      toast.error(error.response?.data?.errors?.[0]?.message || 'Registration Failed');
-      recaptchaRef.current?.reset();
+      console.error(error);
+      const msg = error.response?.data?.errors?.[0]?.message || error.response?.data?.message || 'Registration Failed';
+      toast.error(msg);
+      if(recaptchaRef.current) recaptchaRef.current.reset();
     } finally {
       setIsLoading(false);
     }
@@ -154,9 +172,16 @@ export default function TeamRegister() {
                             <div className="bg-black/80 backdrop-blur-xl rounded-2xl p-6 border border-white/5">
                                 <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Users className="w-5 h-5 text-[#00aaff]" /> Team Details</h2>
                                 <div className="relative">
-                                    <FormInput name="teamName" type="text" placeholder="Enter Team Name" register={register} error={errors.teamName} onBlur={(e) => checkTeamName(e.target.value)} />
+                                    <FormInput 
+                                        name="teamName" 
+                                        type="text" 
+                                        placeholder="Enter Team Name" 
+                                        register={register} 
+                                        error={errors.teamName} 
+                                        onBlur={(e) => checkTeamName(e.target.value)} 
+                                    />
                                     <div className="absolute right-4 top-3 text-sm">
-                                        {isTeamNameAvailable === true && <span className="text-green-400 flex items-center gap-1"><CheckCircle size={14}/></span>}
+                                        {isTeamNameAvailable === true && <span className="text-green-400 flex items-center gap-1"><CheckCircle size={14}/> Available</span>}
                                         {isTeamNameAvailable === false && <span className="text-red-400 flex items-center gap-1"><XCircle size={14}/> Taken</span>}
                                     </div>
                                 </div>
@@ -174,7 +199,6 @@ export default function TeamRegister() {
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             <FormInput name={`members.${index}.fullName`} placeholder="Full Name" register={register} error={errors?.members?.[index]?.fullName} type="text" />
                                             <FormInput name={`members.${index}.studentNumber`} placeholder="Student No." register={register} error={errors?.members?.[index]?.studentNumber} type="text" />
-                                            {/* ONLY College Email */}
                                             <div className="md:col-span-2">
                                                 <FormInput name={`members.${index}.collegeEmail`} placeholder="College Email (@akgec.ac.in)" register={register} error={errors?.members?.[index]?.collegeEmail} type="email" />
                                             </div>
@@ -203,11 +227,11 @@ export default function TeamRegister() {
                         )}
 
                         <div className="flex flex-col items-center gap-6 pt-4">
-                            {/* INVISIBLE RECAPTCHA */}
+                            {/* INVISIBLE RECAPTCHA - YOUR KEY */}
                             <ReCAPTCHA 
                                 ref={recaptchaRef} 
                                 size="invisible"
-                                sitekey="6Ldj5C4sAAAAAHdQleK1Gis3yNPuj7lEnmN8tccZ" 
+                                sitekey="6LcexjIsAAAAAAAm8Lf6qmSz-YiDdormF-wcDDKM" 
                                 theme="dark"
                             />
                             
