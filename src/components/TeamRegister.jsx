@@ -1,7 +1,8 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react'; // Removed useRef (not needed for v3)
 import { useForm, useFieldArray } from 'react-hook-form';
 import { motion } from 'framer-motion';
-import ReCAPTCHA from 'react-google-recaptcha';
+// 1. IMPORT v3 HOOK
+import { useGoogleReCaptcha } from 'react-google-recaptcha-v3';
 import axios from 'axios';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -20,41 +21,44 @@ const branches = ['CSE', 'CSE(AIML)', 'CSE(DS)', 'AIML', 'CS', 'CS(Hindi)', 'CSI
 const genders = ['Male', 'Female'];
 const addressTypes = ['dayscholar', 'hosteller'];
 
-// BACKEND URL
-const BACKEND_URL = "https://team-registeration-2.onrender.com";
+// 2. USE ENV VARIABLE FOR BACKEND
+const BACKEND_URL = import.meta.env.VITE_API_URL;
 
 // SCHEMA
 const memberSchema = z.object({
-  fullName: z.string().min(3, "Too short"),
+  fullName: z.string().trim().min(1, "Full name is required"),
   collegeEmail: z.string()
+    .trim()
     .toLowerCase()
-    .regex(/^[a-z]+[0-9]+@akgec\.ac\.in$/, "Must be letters + numbers @akgec.ac.in (e.g., krish2412@akgec.ac.in)"),
-  gender: z.enum(genders, { required_error: "Required" }),
-  branch: z.enum(branches, { required_error: "Required" }),
-  studentNumber: z.string().regex(/^[0-9]{3,15}$/, "Must be 3-15 digits"),
-  unstopId: z.string().regex(/^[A-Za-z0-9_-]{3,50}$|^NaN$/, "3-50 chars or NaN"),
-  addressType: z.enum(addressTypes, { required_error: "Required" })
+    .regex(/^[a-z]+[0-9]+@akgec\.ac\.in$/, "Format: letters + numbers + @akgec.ac.in (e.g. name2412@akgec.ac.in)"),
+  gender: z.enum(genders, { required_error: "Gender is required" }),
+  branch: z.enum(branches, { required_error: "Branch is required" }),
+  studentNumber: z.string().trim().regex(/^[0-9]{3,15}$/, "Student number must be 3-15 digits"),
+  unstopId: z.string().trim().regex(/^[A-Za-z0-9_-]{3,50}$|^NaN$/, "3-50 chars (letters, numbers, _, -) or NaN"),
+  addressType: z.enum(addressTypes, { required_error: "Address type is required" })
 });
 
 const teamSchema = z.object({
-  teamName: z.string().min(3, "Too short"),
-  members: z.array(memberSchema).min(2, "Min 2 members").max(4, "Max 4 members")
+  teamName: z.string().trim().min(3, "Team name too short (min 3)"),
+  members: z.array(memberSchema).min(2, "Min 2 members required").max(4, "Max 4 members allowed")
 });
 
 export default function TeamRegister() {
   const [isLoading, setIsLoading] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
   const [isTeamNameAvailable, setIsTeamNameAvailable] = useState(null); 
-  const recaptchaRef = useRef(null);
+  
+  // 3. INITIALIZE v3 HOOK
+  const { executeRecaptcha } = useGoogleReCaptcha();
 
   const { register, control, handleSubmit, watch, setValue, formState: { errors } } = useForm({
     resolver: zodResolver(teamSchema),
-    mode: 'onChange',
+    mode: 'onBlur', 
     defaultValues: {
       teamName: "",
       members: [
-        { addressType: "dayscholar" },
-        { addressType: "dayscholar" }
+        { addressType: "dayscholar", gender: "Male", branch: "CSE" },
+        { addressType: "dayscholar", gender: "Male", branch: "CSE" }
       ]
     }
   });
@@ -71,6 +75,7 @@ export default function TeamRegister() {
         setIsTeamNameAvailable(res.data.available);
       }
     } catch (error) {
+      console.error("Team check failed:", error);
       setIsTeamNameAvailable(null);
     }
   };
@@ -80,43 +85,69 @@ export default function TeamRegister() {
         toast.error("Team name is already taken"); 
         return; 
     }
+
+    if (!executeRecaptcha) {
+        toast.error("Captcha not ready yet. Please try again in a moment.");
+        return;
+    }
     
     setIsLoading(true);
     try {
-      // 1. EXECUTE INVISIBLE RECAPTCHA
-      let token = "";
-      try {
-        token = await recaptchaRef.current.executeAsync();
-      } catch (captchaError) {
-        console.warn("Captcha ignored (Localhost restriction)");
-      }
+      // 4. GENERATE v3 TOKEN
+      // The "action" name helps you categorize requests in your Google Admin Console
+      const token = await executeRecaptcha('team_registration');
 
-      // 2. PREPARE DATA
-      // Note: We no longer map 'residenceAddress' as it was removed from schema
+      // PREPARE DATA
       const apiData = {
-          ...data,
+          teamName: data.teamName,
           members: data.members.map(m => ({
-              ...m,
-              // Backend might still want personalEmail? If not, this line is harmless extra data
-              personalEmail: m.collegeEmail, 
+              fullName: m.fullName,
+              collegeEmail: m.collegeEmail,
+              studentNumber: m.studentNumber,
+              branch: m.branch,
+              unstopId: m.unstopId,
+              addressType: m.addressType,
+              gender: m.gender,
+              personalEmail: m.collegeEmail 
           }))
       };
 
-      // 3. SEND TO API
+      // SEND TO API
       await axios.post(`${BACKEND_URL}/api/register`, 
         { ...apiData, captchaToken: token }, 
         { headers: { 'Content-Type': 'application/json' } }
       );
 
       toast.success("Registered Successfully!");
-      if(recaptchaRef.current) recaptchaRef.current.reset(); 
-      setTimeout(() => window.location.reload(), 2000);
+      setTimeout(() => window.location.reload(), 2500);
       
     } catch (error) {
-      console.error(error);
-      const msg = error.response?.data?.errors?.[0]?.message || error.response?.data?.message || 'Registration Failed';
-      toast.error(msg);
-      if(recaptchaRef.current) recaptchaRef.current.reset();
+      console.error("Registration Error:", error);
+      
+      let errorMessage = 'Registration Failed';
+
+      if (error.response) {
+          const data = error.response.data;
+          
+          if (data.message) errorMessage = data.message;
+          
+          if (data.errors) {
+              const firstErrorKey = Object.keys(data.errors)[0];
+              if (firstErrorKey && data.errors[firstErrorKey].message) {
+                  errorMessage = data.errors[firstErrorKey].message;
+              }
+          }
+
+          if (Array.isArray(data.errors) && data.errors.length > 0) {
+              errorMessage = data.errors[0].message || data.errors[0].msg;
+          }
+      } else if (error.request) {
+          errorMessage = "Server not responding. Please check your internet connection.";
+      } else {
+          errorMessage = error.message;
+      }
+
+      toast.error(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -126,7 +157,7 @@ export default function TeamRegister() {
     <div className="relative min-h-screen w-full flex flex-col font-sans bg-[#000000] text-white selection:bg-blue-500/30">
       <ChaosOrbCursor />
       <div className="fixed inset-0 z-0"><NetworkBackground /></div>
-      <ToastContainer position="top-right" autoClose={3000} theme="dark" />
+      <ToastContainer position="top-right" autoClose={5000} theme="dark" />
       {showSplash && <SplashScreen onComplete={() => setShowSplash(false)} />}
 
       {!showSplash && (
@@ -236,18 +267,11 @@ export default function TeamRegister() {
                         </div>
 
                         {fields.length < 4 && (
-                            <button type="button" onClick={() => append({ addressType: "dayscholar" })} className="w-full py-4 rounded-xl border-2 border-dashed border-white/10 text-gray-400 hover:text-white hover:border-[#00aaff] transition-all flex items-center justify-center gap-2"><Plus size={20} /> Add Member</button>
+                            <button type="button" onClick={() => append({ addressType: "dayscholar", gender: "Male", branch: "CSE" })} className="w-full py-4 rounded-xl border-2 border-dashed border-white/10 text-gray-400 hover:text-white hover:border-[#00aaff] transition-all flex items-center justify-center gap-2"><Plus size={20} /> Add Member</button>
                         )}
 
                         <div className="flex flex-col items-center gap-6 pt-4">
-                            {/* ReCAPTCHA */}
-                            <ReCAPTCHA 
-                                ref={recaptchaRef} 
-                                size="invisible"
-                                sitekey="6LcexjIsAAAAAAAm8Lf6qmSz-YiDdormF-wcDDKM" 
-                                theme="dark"
-                            />
-                            
+                            {/* NOTE: ReCAPTCHA Component removed from here. It is now invisible and handled by the hook. */}
                             <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} type="submit" disabled={isLoading} className="px-12 py-4 bg-gradient-to-r from-[#0066cc] to-[#00aaff] rounded-full font-bold text-lg tracking-wider shadow-lg text-white disabled:opacity-50">{isLoading ? "Registering..." : "COMPLETE REGISTRATION"}</motion.button>
                         </div>
                     </form>
